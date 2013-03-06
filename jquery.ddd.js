@@ -44,10 +44,10 @@ DDD.prototype.transform = function(transform_func, args) {
   if (!matrix) { return this; }
 
   // apply the given transform function
-  transform_func.call(this, matrix, transform);
+  var new_matrix = transform_func.call(this, matrix, transform);
 
   // apply the new transform css
-  DDD.prototype.applyMatrix.call(this, matrix);
+  DDD.prototype.applyMatrix.call(this, new_matrix);
 
   return this;
 }
@@ -127,6 +127,48 @@ DDD.prototype.translate_func = function(matrix, transform) {
   return matrix;
 }
 
+// rotation is a complex equation
+// and doesn't use a 1:1 matrix_map
+DDD.prototype.rotate_func = function(matrix, transform) {
+  ['x', 'y', 'z'].forEach(function(axis, index, array) {
+    if (transform[axis] === undefined) {
+      transform[axis] = 0;
+    } else {
+      transform[axis] = +(String(transform[axis]).replace(/[^0-9-\.]/g, ''));
+    }
+  });
+
+  var alpha = Math.min(transform['x'], transform['y'], transform['z']) || 1;
+  var x = (transform['x'] / alpha);
+  var y = (transform['y'] / alpha);
+  var z = (transform['z'] / alpha);
+
+  alpha *= (Math.PI / 180) * -1; // convert deg to radians - negative to match rotate3d()
+  var sc = Math.sin(alpha / 2) * Math.cos(alpha / 2);
+  var sq = Math.pow(Math.sin(alpha / 2), 2);
+
+  var new_matrix = [
+     1 - (2 * (Math.pow(y, 2) + Math.pow(z, 2)) * sq)
+    ,2 * ((x * y * sq) - (z * sc))
+    ,2 * ((x * z * sq) + (y * sc))
+    ,0
+    ,2 * ((x * y * sq) + (z * sc))
+    ,1 - (2 * (Math.pow(x, 2) + Math.pow(z, 2)) * sq)
+    ,2 * ((y * z * sq) - (x * sc))
+    ,0
+    ,2 * ((x * z * sq) - (y * sc))
+    ,2 * ((y * z * sq) + (x * sc))
+    ,1 - (2 * (Math.pow(x, 2) + Math.pow(y, 2)) * sq)
+    ,0
+    ,0
+    ,0
+    ,0
+    ,1
+  ];
+
+  return new_matrix;
+}
+
 DDD.prototype.scaleBy = function(/* args */) {
   this.transform_type = 'by';
   return DDD.prototype.transform.call(this, DDD.prototype.scale_func, arguments);
@@ -143,6 +185,14 @@ DDD.prototype.translateTo = function(/* args */) {
   this.transform_type = 'to';
   return DDD.prototype.transform.call(this, DDD.prototype.translate_func, arguments);
 }
+DDD.prototype.rotateBy = function(/* args */) {
+  this.transform_type = 'by';
+  return DDD.prototype.transform.call(this, DDD.prototype.rotate_func, arguments);
+}
+DDD.prototype.rotateTo = function(/* args */) {
+  this.transform_type = 'to';
+  return DDD.prototype.transform.call(this, DDD.prototype.rotate_func, arguments);
+}
 
 // parse a matrix3d() css string into a 16 length array
 DDD.prototype.parseMatrix = function(matrix) {
@@ -151,12 +201,29 @@ DDD.prototype.parseMatrix = function(matrix) {
   }
 
   var matrix_array = matrix.match(/(-*[0-9]+\.*[0-9]*)[,\)]/g);
-  if (!matrix_array || $.isArray(matrix_array) === -1 || matrix_array.length < 16) {
+  if (!matrix_array || $.isArray(matrix_array) === -1) {
     return null;
   }
 
+  if (matrix_array.length < 16) {
+    if (matrix_array.length === 6) {
+      // DOM decided to give us a matrix() which is 2d
+      // luckily, it can be mapped to a proper matrix3d()
+      var matrix_dd = matrix_array;
+      matrix_array = DDD.prototype.identity_matrix;
+      matrix_array[0] = matrix_dd[0];
+      matrix_array[4] = matrix_dd[1];
+      matrix_array[1] = matrix_dd[2];
+      matrix_array[5] = matrix_dd[3];
+      matrix_array[3] = matrix_dd[4];
+      matrix_array[7] = matrix_dd[6];
+    } else {
+      return null;
+    }
+  }
+
   matrix_array.forEach(function(element, index, array) {
-    matrix_array[index] = +(element.replace(/[,\)]$/, ''));
+    matrix_array[index] = +(String(element).replace(/[,\)]$/, ''));
   });
 
   return matrix_array;
@@ -180,6 +247,13 @@ DDD.prototype.applyMatrix = function(matrix) {
             'transform': new_css
   });
 }
+
+DDD.prototype.identity_matrix = [
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1
+];
 
 // convenient for using DDD in a chained call
 //  i.e. $('#my_object').ddd().scaleBy('10%', 'xy').end()
