@@ -28,8 +28,8 @@ scaleTo() takes the same varieties of arguments, but instead of scaling *by* a c
 
 Likewise, translateBy() & translateTo() as well as rotateBy() and rotateTo() take arguments in the same format.
 
-The translate * scale functions take a number of pixels as their unit,
-while the rotate functions take a number of degrees.
+The four translate & scale functions each take a number of pixels (e.g. 125 or '125px') or a percent ('15%').
+The two rotate functions instead take a number of degrees (-45 or '-45deg').
 
 These functions provide instantaneous 3d transformations, which can be useful on their own or in the step() function of animations.
 
