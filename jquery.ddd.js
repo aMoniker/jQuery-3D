@@ -33,7 +33,7 @@ function get_transform_object(/* args */) {
 }
 
 // args can be array of [int/string, string] or [object]
-DDD.prototype.transform = function(transform_type, matrix_map, args) {
+DDD.prototype.transform = function(transform_func, args) {
   // check for bullshit, fail gracefully
   if (!arguments.length) { return this; }
   var transform = get_transform_object.apply(this, args);
@@ -42,22 +42,32 @@ DDD.prototype.transform = function(transform_type, matrix_map, args) {
   if (!css_matrix) { return this; }
   var matrix = DDD.prototype.parseMatrix(css_matrix);
   if (!matrix) { return this; }
-  console.warn('transformation', transform);
 
-  // absolute or relative frame of reference?
-  if (!transform_type || $.inArray(transform_type, ['by', 'to']) === -1) {
-    transform_type = 'by'; // default to by
-  }
-  
-  // scale relevant dimensions
+  // apply the given transform function
+  transform_func.call(this, matrix, transform);
+
+  // apply the new transform css
+  DDD.prototype.applyMatrix.call(this, matrix);
+
+  return this;
+}
+
+// scaling matrix:
+// | x 0 0 0 | matrix_map[0]
+// | 0 y 0 0 | matrix_map[5]
+// | 0 0 1 0 |
+// | 0 0 0 z | matrix_map[15]
+DDD.prototype.scale_map = { 'x': 0, 'y': 5, 'z': 15 };
+DDD.prototype.scale_func = function(matrix, transform) {
+  var matrix_map = DDD.prototype.scale_map;
+
   ['x', 'y', 'z'].forEach($.proxy(function(axis, index, array) {
     if (transform[axis] === undefined) { return; }
     var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
-    if (!transform_value) { return; }
 
     var transform_ratio = matrix[matrix_map[axis]];
     if (/%$/.test(String(transform[axis]))) { // scale by percent
-      if (transform_type === 'to') {
+      if (this.transform_type === 'to') {
         matrix[matrix_map[axis]] *= (transform_value * 0.01);
       } else {
         matrix[matrix_map[axis]] += (matrix[matrix_map[axis]] * (transform_value * 0.01));
@@ -74,44 +84,64 @@ DDD.prototype.transform = function(transform_type, matrix_map, args) {
       }
       if (!size) { size = 1; } // prevent division by 0
 
-      if (transform_type === 'to') {
+      if (this.transform_type === 'to') {
         matrix[matrix_map[axis]] = (transform_value / size) * transform_ratio;
       } else {
         matrix[matrix_map[axis]] = (size + transform_value) * (transform_ratio / size);
       }
     }
   }, this));
-
-  // apply the new transform css
-  DDD.prototype.applyMatrix.call(this, matrix);
+  
+  return matrix;
 }
 
-// maps the type of transform to the
-// corresponding element of matrix3d()
-  // scaling matrix:
-  // | x 0 0 0 | matrix_map[0]
-  // | 0 y 0 0 | matrix_map[5]
-  // | 0 0 1 0 |
-  // | 0 0 0 z | matrix_map[15]
-DDD.prototype.scale_map = { 'x': 0, 'y': 5, 'z': 15 };
-  // translation matrix:
-  // | 1 0 0 0 |
-  // | 0 1 0 0 |
-  // | 0 0 1 0 |
-  // | x y z 1 | matrix_map[12, 13, 14]
+// translation matrix:
+// | 1 0 0 0 |
+// | 0 1 0 0 |
+// | 0 0 1 0 |
+// | x y z 1 | matrix_map[12, 13, 14]
 DDD.prototype.translate_map = { 'x': 12, 'y': 13, 'z': 14 };
+DDD.prototype.translate_func = function(matrix, transform) {
+  var matrix_map = DDD.prototype.translate_map;
+
+  ['x', 'y', 'z'].forEach($.proxy(function(axis, index, array) {
+    if (transform[axis] === undefined) { return; }
+    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
+
+    var transform_ratio = matrix[matrix_map[axis]];
+    if (/%$/.test(String(transform[axis]))) { // scale by percent
+      if (this.transform_type === 'to') {
+        matrix[matrix_map[axis]] *= (transform_value * 0.01);
+      } else {
+        matrix[matrix_map[axis]] += (matrix[matrix_map[axis]] * (transform_value * 0.01));
+      }
+    } else { // scale by pixels
+      if (this.transform_type === 'to') {
+        matrix[matrix_map[axis]] = transform_value;
+      } else {
+        matrix[matrix_map[axis]] += transform_value;
+      }
+    }
+  }, this));
+  
+  return matrix;
+}
 
 DDD.prototype.scaleBy = function(/* args */) {
-  return DDD.prototype.transform.apply(this, ['by', DDD.prototype.scale_map, arguments]);
+  this.transform_type = 'by';
+  return DDD.prototype.transform.call(this, DDD.prototype.scale_func, arguments);
 }
 DDD.prototype.scaleTo = function(/* args */) {
-  return DDD.prototype.transform.apply(this, ['to', DDD.prototype.scale_map, arguments]);
+  this.transform_type = 'to';
+  return DDD.prototype.transform.call(this, DDD.prototype.scale_func, arguments);
 }
 DDD.prototype.translateBy = function(/* args */) {
-  return DDD.prototype.transform.apply(this, ['by', DDD.prototype.translate_map, arguments]);
+  this.transform_type = 'by';
+  return DDD.prototype.transform.call(this, DDD.prototype.translate_func, arguments);
 }
 DDD.prototype.translateTo = function(/* args */) {
-  return DDD.prototype.transform.apply(this, ['to', DDD.prototype.translate_map, arguments]);
+  this.transform_type = 'to';
+  return DDD.prototype.transform.call(this, DDD.prototype.translate_func, arguments);
 }
 
 // parse a matrix3d() css string into a 16 length array
@@ -141,8 +171,6 @@ DDD.prototype.applyMatrix = function(matrix) {
     new_css += element;
   });
   new_css += ')';
-
-  console.warn('using this', this);
 
   this.$.css({
     '-webkit-transform': new_css,
