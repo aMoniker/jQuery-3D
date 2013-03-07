@@ -75,3 +75,16 @@ $.ddd.animate({
 }, 2000, 'easeInCirc', function() {
   // complete callback
 });
+
+
+You can call ddd one of two main ways:
+  `var ddd = $.ddd('#my-element');`
+or
+  `var ddd = $('#my-element').ddd();`
+
+If you'd just like access to some of ddd's useful functions,
+but don't want it in the context of a particular DOM node:
+  var ddd = $.ddd();
+Note that transformation calls won't work without a proper DOM context,
+which can be set manually by `ddd.$ = $('#my-dom-node');`
+If you use ddd this way, you are a hacker, and are own your own.
