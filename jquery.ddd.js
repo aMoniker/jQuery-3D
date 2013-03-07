@@ -17,6 +17,56 @@ var DDD = function(selector) {
   return this;
 }
 
+// all transform methods get routed through this function
+// args can be array of [int/string, string] or [object]
+DDD.prototype.transform = function(transform_func, args) {
+  // check for bullshit, fail gracefully
+  if (!arguments.length) { return this; }
+  var transform = get_transform_object.apply(this, args);
+  if (!transform) { return this; }
+
+  // use the identity matrix if one doesn't exist in css
+  var matrix;
+  var css_matrix = this.$.css('transform');
+  if (!css_matrix || css_matrix === 'none') {
+    matrix = Matrix.I(4);
+  } else {
+    matrix = ddd.parseMatrix(css_matrix);
+    if (!matrix || !matrix.elements || isNaN(matrix.elements[0][0])) {
+      matrix = Matrix.I(4);
+    }
+  }
+
+  // console.log('using parsed matrix\n', matrix.inspect());
+
+  var components = ddd.decomposeMatrix(matrix);
+
+  // console.log('decomposed matrix\n', decomposed);
+
+  // apply the given transform function
+  // each transform function operates on the decomposed matrix3d()
+  // components, and returns a modified component object
+  // var modified_components = transform_func.call(this, components);
+
+  // var recomposed_matrix = ddd.recomposeMatrix(
+  //                              decomposed.perspective
+  //                             ,decomposed.translation
+  //                             ,decomposed.quaternion
+  //                             ,decomposed.skew
+  //                             ,decomposed.scale );
+  
+  var recomposed_matrix = ddd.recompose_matrix(modified_components);
+
+  // console.log('recomposed matrix\n', recomposed_matrix.inspect());
+
+  // apply the new transform css
+  ddd.applyMatrix.call(this, recomposed_matrix);
+
+  return this;
+}
+
+// standardizes the multiple input formats into one
+// object format { x: 10, y, '20px', z: '5%' }
 function get_transform_object(/* args */) {
   var transform = {};
   var args = Array.prototype.slice.call(arguments);
@@ -32,50 +82,6 @@ function get_transform_object(/* args */) {
   }
 
   return transform;
-}
-
-// all transform methods get passed through this function
-// args can be array of [int/string, string] or [object]
-DDD.prototype.transform = function(transform_func, args) {
-  // check for bullshit, fail gracefully
-  if (!arguments.length) { return this; }
-  var transform = get_transform_object.apply(this, args);
-  if (!transform) { return this; }
-  var css_matrix = this.$.css('transform');
-
-  // use the identity matrix if one doesn't exist
-  var matrix;
-  if (!css_matrix || css_matrix === 'none') {
-    matrix = Matrix.I(4);
-  } else {
-    matrix = ddd.parseMatrix(css_matrix);
-    if (!matrix || !matrix.elements || isNaN(matrix.elements[0][0])) {
-      matrix = Matrix.I(4);
-    }
-  }
-
-  // console.log('using parsed matrix\n', matrix.inspect());
-
-  var decomposed = ddd.decomposeMatrix(matrix);
-
-  // console.log('decomposed matrix\n', decomposed);
-
-  var recomposed_matrix = ddd.recomposeMatrix(
-                               decomposed.perspective
-                              ,decomposed.translation
-                              ,decomposed.quaternion
-                              ,decomposed.skew
-                              ,decomposed.scale );
-
-  // console.log('recomposed matrix\n', recomposed_matrix.inspect());
-
-  // apply the given transform function
-  // var new_matrix = transform_func.call(this, matrix, transform);
-
-  // apply the new transform css
-  ddd.applyMatrix.call(this, recomposed_matrix);
-
-  return this;
 }
 
 // scaling matrix:
@@ -456,22 +462,35 @@ DDD.prototype.decomposeMatrix = function(matrix) {
   if (row[1][0] > row[0][1]) { quaternion[2] *= -1; }
 
   // return components as Sylvester vectors
-  var ret = {
+  var components = {
      translation: Vector.create(translation)
     ,scale      : Vector.create(scale)
     ,skew       : Vector.create(skew)
     ,perspective: perspective // already a Vector
     ,quaternion : Vector.create(quaternion)
   };
-  return ret;
+  return components;
 }
 
 // translates structures produced by ddd.decomposeMatrix()
-// back into a 4x4 Sylvester matrix. All parameters are required.
-DDD.prototype.recomposeMatrix = function(perspective, translation, quaternion, skew, scale) {
-  if (!perspective || !translation || !quaternion || !skew || !scale) {
-    return null;
-  }
+// back into a 4x4 Sylvester matrix.
+DDD.prototype.recomposeMatrix = function(components) {
+  if (!components) { return null; }
+
+  // All components are required
+  var missing_components = false;
+  var required_components = ['perspective', 'translation', 'quaternion', 'skew', 'scale'];
+  required_components.foreach(function(component, i, array) {
+    if (!components[component]) { missing_components = true; }
+  });
+  if (missing_components) { return null; }
+
+  // Convenience variables
+  var perspective = components.perspective;
+  var translation = components.translation;
+  var quaternion  = components.quaternion;
+  var skew        = components.skew;
+  var scale       = components.scale;
 
   // Start with the Identity matrix
   var matrix = Matrix.I(4);
