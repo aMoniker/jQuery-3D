@@ -37,30 +37,22 @@ DDD.prototype.transform = function(transform_func, args) {
     }
   }
 
-  // console.log('using parsed matrix\n', matrix.inspect());
-
+  // get the components of a matrix (scale, skew, transform, etc.)
   var components = ddd.decomposeMatrix(matrix);
+  if (!components) { return this; }
 
-  // console.log('decomposed matrix\n', decomposed);
+  // apply the given transform function to to the 3d components
+  var modified_components = transform_func.call(this, components, transform);
+  if (!modified_components) { return this; }
 
-  // apply the given transform function
-  // each transform function operates on the decomposed matrix3d()
-  // components, and returns a modified component object
-  // var modified_components = transform_func.call(this, components);
-
-  // var recomposed_matrix = ddd.recomposeMatrix(
-  //                              decomposed.perspective
-  //                             ,decomposed.translation
-  //                             ,decomposed.quaternion
-  //                             ,decomposed.skew
-  //                             ,decomposed.scale );
-  
-  var recomposed_matrix = ddd.recompose_matrix(modified_components);
-
-  // console.log('recomposed matrix\n', recomposed_matrix.inspect());
+  // reconstitute a matrix from the updated components
+  var recomposed_matrix = ddd.recomposeMatrix(modified_components);
+  if (!recomposed_matrix) { return this; }
 
   // apply the new transform css
-  ddd.applyMatrix.call(this, recomposed_matrix);
+  if (recomposed_matrix) {
+    ddd.applyMatrix.call(this, recomposed_matrix);
+  }
 
   return this;
 }
@@ -84,46 +76,40 @@ function get_transform_object(/* args */) {
   return transform;
 }
 
-// scaling matrix:
-// | x 0 0 0 | matrix_map[0]
-// | 0 y 0 0 | matrix_map[5]
-// | 0 0 1 0 |
-// | 0 0 0 z | matrix_map[15]
-DDD.prototype.scale_map = { 'x': 0, 'y': 5, 'z': 15 };
-DDD.prototype.scale_func = function(matrix, transform) {
-  var matrix_map = ddd.scale_map;
+DDD.prototype.scale_func = function(components, transform) {
+  var map = { x: 0, y: 1, z: 2 };
 
   // scaling Z doesn't quite make sense in 3d environment comprising only 2d shapes
-  ['x', 'y'].forEach($.proxy(function(axis, index, array) {
+  // technically the value is there, but it doesn't seem to do much
+  // if depth could be determined (for pixel-based transforms) it can be added back
+  ['x', 'y'].forEach($.proxy(function(axis, i, array) {
     if (transform[axis] === undefined) { return; }
-    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
 
-    var transform_ratio = matrix[matrix_map[axis]];
+    var transform_ratio = components.scale.elements[map[axis]];
+    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
     if (/%$/.test(String(transform[axis]))) { // scale by percent
       if (this.transform_type === 'to') {
-        matrix[matrix_map[axis]] *= (transform_value * 0.01);
+        components.scale.elements[map[axis]] *= (transform_value * 0.01);
       } else {
-        matrix[matrix_map[axis]] += (matrix[matrix_map[axis]] * (transform_value * 0.01));
+        components.scale.elements[map[axis]] += (transform_ratio * (transform_value * 0.01));
       }
     } else { // scale by pixels
       var size;
       switch (axis) {
-        case 'x': size = this.$.width()  * transform_ratio;
-        break;
-        case 'y': size = this.$.height() * transform_ratio;
-        break;
+        case 'x': size = this.$.width()  * transform_ratio; break;
+        case 'y': size = this.$.height() * transform_ratio; break;
       }
       if (!size) { size = 1; } // prevent division by 0
 
       if (this.transform_type === 'to') {
-        matrix[matrix_map[axis]] = (transform_value / size) * transform_ratio;
+        components.scale.elements[map[axis]] = (transform_value / size) * transform_ratio;
       } else {
-        matrix[matrix_map[axis]] = (size + transform_value) * (transform_ratio / size);
+        components.scale.elements[map[axis]] = (size + transform_value) * (transform_ratio / size);
       }
     }
   }, this));
-  
-  return matrix;
+
+  return components;
 }
 
 // translation matrix:
@@ -297,7 +283,7 @@ DDD.prototype.parseMatrix = function(matrix) {
       // DOM decided to give us a matrix() which is 2d
       // luckily, it can be mapped to a proper matrix3d()
       var matrix_dd = matrix_array;
-      matrix_array = ddd.identity_matrix;
+      matrix_array = ddd.sylvesterToLinearMatrix(Matrix.I(4));
       matrix_array[0]  = matrix_dd[0];
       matrix_array[1]  = matrix_dd[1];
       matrix_array[4]  = matrix_dd[2];
@@ -316,13 +302,7 @@ DDD.prototype.parseMatrix = function(matrix) {
     matrix_array[index] = +(String(element).replace(/[,\)]$/, ''));
   });
 
-  // turn the matrix_array into a Sylvester Matrix
-  var four_by_four = [];
-  while (matrix_array.length) {
-    four_by_four.push(matrix_array.splice(0, 4));
-  }
-
-  return Matrix.create(four_by_four);
+  return ddd.linearToSylvesterMatrix(matrix_array);
 }
 
 // takes the Sylvester matrix constructed by parseMatrix
@@ -332,10 +312,15 @@ DDD.prototype.applyMatrix = function(matrix) {
 
   for (var i = 0; i < 4; i++) {
     for (var j = 0; j < 4; j++) {
-      if (i !== 0 && j !== 0) {
-        new_css += ', ';
+      if (i !== 0 || j !== 0) { new_css += ', '; }
+
+      // matrix3d() does not play well with javascript numbers using scientific notation
+      if (/e[\+-][0-9]+$/.test(String(matrix.elements[i][j]))) {
+        var places = String(matrix.elements[i][j]).match(/[0-9]+$/);
+        new_css += Number(matrix.elements[i][j]).toFixed(++places > 20 ? 20 : places);
+      } else {
+        new_css += matrix.elements[i][j];
       }
-      new_css += matrix.elements[i][j];
     }
   }
 
@@ -348,6 +333,39 @@ DDD.prototype.applyMatrix = function(matrix) {
          '-o-transform': new_css,
             'transform': new_css
   });
+}
+
+// takes a square matrix array (e.g. of length 16)
+// and converts it to a Sylvester matrix
+DDD.prototype.linearToSylvesterMatrix = function(matrix) {
+  if (!matrix || !matrix.length) { return null; }
+
+  var side = Math.sqrt(matrix.length);
+  if (side % 1 !== 0) { return 0; } // not square
+
+  var row_array = [];
+  while (matrix.length) {
+    row_array.push(matrix.splice(0, side));
+  }
+
+  return Matrix.create(row_array);
+}
+
+// takes a Sylvester matrix and converts it to a
+// linear array equivalent by concatenating its rows in order
+DDD.prototype.sylvesterToLinearMatrix = function(matrix) {
+  if (!matrix || !matrix.elements) { return null; }
+
+  var linear_matrix = [];
+  var rows = matrix.rows();
+  var cols = matrix.cols();
+  for (var i = 0; i < rows; i++) {
+    for (var j = 0; j < cols; j++) {
+      linear_matrix.push(matrix.elements[i][j]);
+    }
+  }
+
+  return linear_matrix;
 }
 
 // decomposes a Sylvester matrix into components
@@ -394,8 +412,7 @@ DDD.prototype.decomposeMatrix = function(matrix) {
                     .transpose()
                     .multiply(right_hand_vector);
   } else { // no perspective
-    perspective[0] = perspective[1] = perspective[2] = 0;
-    perspective[3] = 1;
+    perspective = Vector.create([0, 0, 0, 1]);
   }
 
   // Translation
@@ -480,7 +497,7 @@ DDD.prototype.recomposeMatrix = function(components) {
   // All components are required
   var missing_components = false;
   var required_components = ['perspective', 'translation', 'quaternion', 'skew', 'scale'];
-  required_components.foreach(function(component, i, array) {
+  required_components.forEach(function(component, i, array) {
     if (!components[component]) { missing_components = true; }
   });
   if (missing_components) { return null; }
