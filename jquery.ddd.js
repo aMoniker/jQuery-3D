@@ -69,6 +69,9 @@ function get_transform_object(/* args */) {
         transform[axis] = args[0];
       }
     });
+  } else if (args.length === 1 && $.isArray(args[0])) {
+    // special case for rotate functions
+    transform = args[0];
   } else { // expecting { 'x': 20, 'y': 10 } format
     transform = $.extend(transform, args[0]);
   }
@@ -85,7 +88,7 @@ DDD.prototype.scale_func = function(components, transform) {
     if (transform[axis] === undefined) { return; }
 
     var transform_ratio = components.scale.elements[map[axis]];
-    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
+    var transform_value = +(String(transform[axis]).replace(/[^0-9\.-]/g, ''));
     if (/%$/.test(String(transform[axis]))) { // scale by percent
       if (this.transform_type === 'to') {
         components.scale.elements[map[axis]] *= (transform_value * 0.01);
@@ -116,7 +119,7 @@ DDD.prototype.translate_func = function(components, transform) {
   ['x', 'y', 'z'].forEach($.proxy(function(axis, i, array) {
     if (transform[axis] === undefined) { return; }
 
-    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
+    var transform_value = +(String(transform[axis]).replace(/[^0-9\.-]/g, ''));
     if (/%$/.test(String(transform[axis]))) { // scale by percent
       if (this.transform_type === 'to') {
         components.translation.elements[map[axis]] *= (transform_value * 0.01);
@@ -135,104 +138,59 @@ DDD.prototype.translate_func = function(components, transform) {
   return components;  
 }
 
-// rotation is a complex equation
-// and doesn't use a 1:1 matrix_map
-// see the 3D rotation matrix spec here:
-// http://www.w3.org/TR/css3-transforms/#MatrixDefined
-DDD.prototype.rotate_func = function(matrix, transform) {
-  // ['x', 'y', 'z'].forEach(function(axis, index, array) {
-  //   if (transform[axis] === undefined) {
-  //     transform[axis] = 0;
-  //   } else {
-  //     transform[axis] = +(String(transform[axis]).replace(/[^0-9-\.]/g, ''));
-  //   }
-  // });
+DDD.prototype.rotate_func = function(components, transforms) {
+  if (!$.isArray(transforms)) { transforms = [transforms] }
 
-  var a; // alpha
-  var rotation_matrices = [];
-  ['x', 'y', 'z'].forEach(function(axis, index, array) {
-    if (transform[axis] === undefined) { return; }
-    a = transform[axis] = +(String(transform[axis]).replace(/[^0-9-\.]/g, ''));
+  var map = { x: 0, y: 1, z: 2 };
+  transforms.forEach(function(transform, i) {
+    var axis = transform.x ? 'x'
+             : transform.y ? 'y'
+             : transform.z ? 'z'
+             : undefined;
 
-    switch (axis) {
-      case 'x': rotation_matrices.push([ 1 , 0           , 0                , 0 ,
-                                         0 , Math.cos(a) , Math.sin(a * -1) , 0 ,
-                                         0 , Math.sin(a) , Math.cos(a)      , 0 ,
-                                         0 , 0           , 0                , 1 ]);
-      break;
-      case 'y': rotation_matrices.push([ Math.cos(a)      , 0 , Math.sin(a), 0 ,
-                                         0                , 1 , 0          , 0 ,
-                                         Math.sin(a * -1) , 0 , Math.cos(a), 0 ,
-                                         0                , 0 , 0          , 1 ]);
-      break;
-      case 'z': rotation_matrices.push([ Math.cos(a) , Math.sin(a * -1) , 0 , 0 ,
-                                         Math.sin(a) , Math.cos(a)      , 0 , 0 ,
-                                         0           , 0                , 1 , 0 ,
-                                         0           , 0                , 0 , 1 ]);
+    if (axis === undefined) { return; }
+
+    var transform_value = +(String(transform[axis]).replace(/[^0-9\.-]/g, ''));
+    var rotation_angle = transform_value * (Math.PI / 180);
+    var rotation_axis = [0, 0, 0];
+    rotation_axis[map[axis]] = 1;
+
+    // make a quaternion representing the rotation
+    var local_rotation = Vector.create([
+       rotation_axis[0] * Math.sin(rotation_angle / 2)
+      ,rotation_axis[1] * Math.sin(rotation_angle / 2)
+      ,rotation_axis[2] * Math.sin(rotation_angle / 2)
+      ,Math.cos(rotation_angle / 2)
+    ]);
+
+    // obtain the new quat by multiplying the old quat by the new rotation
+    var quat_product = ddd.quaternionMultiply(components.quaternion, local_rotation);
+    if (!quat_product) { return; }
+
+    components.quaternion = quat_product;
+
+    // (w^2 + x^2 + y^2 + z^2)
+    var magnitude = Math.pow(components.quaternion.elements[0], 2)
+                  + Math.pow(components.quaternion.elements[1], 2)
+                  + Math.pow(components.quaternion.elements[2], 2)
+                  + Math.pow(components.quaternion.elements[3], 2);
+
+    // normalize the quat if the magnitude is out of tolerance
+    if (magnitude < 1 || magnitude > 1) { // zero tolerance for now
+      for (var i = 0; i < 4; i++) {
+        components.quaternion.elements[i] /= magnitude;
+        components.quaternion.elements[i] = components.quaternion.elements[i].toFixed(15);
+      }
     }
   });
 
-  new_matrix = matrix;
-  rotation_matrices.forEach(function(rot_matrix, index, array) {
-    new_matrix = ddd.matrixMultiply(new_matrix, rot_matrix);
-  });
-
-  // rotationXMatrix = $M([
-  //   [1,0,0,0],
-  //   [0,Math.cos(a), Math.sin(-a), 0],
-  //   [0,Math.sin(a), Math.cos( a), 0],
-  //   [0,0,0,1]
-  // ])
-
-  // rotationYMatrix = $M([
-  //   [Math.cos( b), 0, Math.sin(b),0],
-  //   [0,1,0,0],
-  //   [Math.sin(-b), 0, Math.cos(b), 0],
-  //   [0,0,0,1]
-  // ])
-
-  // rotationZMatrix = $M([
-  //   [Math.cos(c), Math.sin(-c), 0, 0],
-  //   [Math.sin(c), Math.cos( c), 0, 0],
-  //   [0,0,1,0],
-  //   [0,0,0,1]
-  // ])
-
-  // var alpha = Math.min(transform['x'], transform['y'], transform['z']) || 1;
-  // var x = (transform['x'] / alpha);
-  // var y = (transform['y'] / alpha);
-  // var z = (transform['z'] / alpha);
-
-  // alpha *= (Math.PI / 180) * -1; // convert deg to radians - negative to match rotate3d()
-  // var sc = Math.sin(alpha / 2) * Math.cos(alpha / 2);
-  // var sq = Math.pow(Math.sin(alpha / 2), 2);
-
-  // var new_matrix = [
-  //    1 - (2 * (Math.pow(y, 2) + Math.pow(z, 2)) * sq)
-  //   ,2 * ((x * y * sq) - (z * sc))
-  //   ,2 * ((x * z * sq) + (y * sc))
-  //   ,0
-  //   ,2 * ((x * y * sq) + (z * sc))
-  //   ,1 - (2 * (Math.pow(x, 2) + Math.pow(z, 2)) * sq)
-  //   ,2 * ((y * z * sq) - (x * sc))
-  //   ,0
-  //   ,2 * ((x * z * sq) - (y * sc))
-  //   ,2 * ((y * z * sq) + (x * sc))
-  //   ,1 - (2 * (Math.pow(x, 2) + Math.pow(y, 2)) * sq)
-  //   ,0
-  //   ,0
-  //   ,0
-  //   ,0
-  //   ,1
-  // ];
-
-  // if (this.transform_type === 'by') {
-  //   new_matrix = DDD.prototype.matrixMultiply(matrix, new_matrix);
-  // }
-
-  return new_matrix;
+  return components;
 }
 
+// scale and translate functions take arguments like:
+//   scaleBy(45, 'x'); or translateTo(0, 'xyz');
+// but they can also take arguments like:
+//   scaleTo({ x: '50%', y: '150%' });
 DDD.prototype.scaleBy = function(/* args */) {
   this.transform_type = 'by';
   return ddd.transform.call(this, ddd.scale_func, arguments);
@@ -249,6 +207,14 @@ DDD.prototype.translateTo = function(/* args */) {
   this.transform_type = 'to';
   return ddd.transform.call(this, ddd.translate_func, arguments);
 }
+// rotate functions are a little different.
+// since quaternion multiplication is non-commutative,
+// I can't provide the same interface as scale or translate
+// since I wouldn't know in which order to perform rotations
+// So, these functions accept a slightly different format:
+//   rotateBy(45, 'x');  a single axis and a degree value
+// or an array of objects representing rotations that should be applied in order:
+//   rotateBy([ { x: 45 }, { y: 20 }, { z: 50 }, { x: 15 }, ... ]);
 DDD.prototype.rotateBy = function(/* args */) {
   this.transform_type = 'by';
   return ddd.transform.call(this, ddd.rotate_func, arguments);
@@ -465,9 +431,9 @@ DDD.prototype.decomposeMatrix = function(matrix) {
   quaternion[2] = 0.5 * Math.sqrt(Math.max(1 - row[0][0] - row[1][1] + row[2][2], 0));
   quaternion[3] = 0.5 * Math.sqrt(Math.max(1 + row[0][0] + row[1][1] + row[2][2], 0));
 
-  if (row[2][1] > row[1][2]) { quaternion[0] *= -1; }
-  if (row[0][2] > row[2][0]) { quaternion[1] *= -1; }
-  if (row[1][0] > row[0][1]) { quaternion[2] *= -1; }
+  if (row[2][1] < row[1][2]) { quaternion[0] *= -1; }
+  if (row[0][2] < row[2][0]) { quaternion[1] *= -1; }
+  if (row[1][0] < row[0][1]) { quaternion[2] *= -1; }
 
   // return components as Sylvester vectors
   var components = {
@@ -575,7 +541,7 @@ DDD.prototype.vectorLength = function(vector) {
   return len;
 }
 
-// expects a vector array [x, y, z, ...]
+// expects a vector array [x, y, z]
 DDD.prototype.vectorNormalize = function(vector) {
   var len = ddd.vectorLength(vector);
   if (!len) { return null; }
@@ -628,6 +594,32 @@ DDD.prototype.crossProduct = function(vector_a, vector_b) {
   product[1] = (vector_a[2] * vector_b[0]) - (vector_a[0] * vector_b[1]);
   product[2] = (vector_a[0] * vector_b[1]) - (vector_a[1] * vector_b[0]);
   return product;
+}
+
+// expects two quaternions as arrays or Sylvester vectors
+// and returns their non-commutative product
+DDD.prototype.quaternionMultiply = function(q1, q2) {
+  if (!q1 || !q2) { return null; }
+
+  // convert potential Sylvestor vectors to Arrays
+  if (!$.isArray(q1) && q1.elements) { q1 = q1.elements; }
+  if (!$.isArray(q2) && q2.elements) { q2 = q2.elements; }
+
+  // arrays must be the same length
+  if (q1.length !== q2.length) { return null; }
+
+  // for readability
+  var x1 = q1[0], y1 = q1[1], z1 = q1[2], w1 = q1[3];
+  var x2 = q2[0], y2 = q2[1], z2 = q2[2], w2 = q2[3];
+
+  var vector =  Vector.create([
+     (w1 * x2) + (x1 * w2) + (y1 * z2) - (z1 * y2)
+    ,(w1 * y2) - (x1 * z2) + (y1 * w2) + (z1 * x2)
+    ,(w1 * z2) + (x1 * y2) - (y1 * x2) + (z1 * w2)
+    ,(w1 * w2) - (x1 * x2) - (y1 * y2) - (z1 * z2)
+  ]);
+
+  return vector;
 }
 
 // convenient for using DDD in a chained call
