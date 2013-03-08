@@ -77,11 +77,10 @@ function get_transform_object(/* args */) {
 }
 
 DDD.prototype.scale_func = function(components, transform) {
-  var map = { x: 0, y: 1, z: 2 };
-
   // scaling Z doesn't quite make sense in 3d environment comprising only 2d shapes
   // technically the value is there, but it doesn't seem to do much
   // if depth could be determined (for pixel-based transforms) it can be added back
+  var map = { x: 0, y: 1, z: 2 };
   ['x', 'y'].forEach($.proxy(function(axis, i, array) {
     if (transform[axis] === undefined) { return; }
 
@@ -112,36 +111,28 @@ DDD.prototype.scale_func = function(components, transform) {
   return components;
 }
 
-// translation matrix:
-// | 1 0 0 0 |
-// | 0 1 0 0 |
-// | 0 0 1 0 |
-// | x y z 1 | matrix_map[12, 13, 14]
-DDD.prototype.translate_map = { 'x': 12, 'y': 13, 'z': 14 };
-DDD.prototype.translate_func = function(matrix, transform) {
-  var matrix_map = ddd.translate_map;
-
-  ['x', 'y', 'z'].forEach($.proxy(function(axis, index, array) {
+DDD.prototype.translate_func = function(components, transform) {
+  var map = { x: 0, y: 1, z: 2 };
+  ['x', 'y', 'z'].forEach($.proxy(function(axis, i, array) {
     if (transform[axis] === undefined) { return; }
-    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
 
-    var transform_ratio = matrix[matrix_map[axis]];
+    var transform_value = +(String(transform[axis]).replace(/[^0-9.-]/g, ''));
     if (/%$/.test(String(transform[axis]))) { // scale by percent
       if (this.transform_type === 'to') {
-        matrix[matrix_map[axis]] *= (transform_value * 0.01);
+        components.translation.elements[map[axis]] *= (transform_value * 0.01);
       } else {
-        matrix[matrix_map[axis]] += (matrix[matrix_map[axis]] * (transform_value * 0.01));
+        components.translation.elements[map[axis]] += (components.translation.elements[map[axis]] * (transform_value * 0.01));
       }
     } else { // scale by pixels
       if (this.transform_type === 'to') {
-        matrix[matrix_map[axis]] = transform_value;
+        components.translation.elements[map[axis]] = transform_value;
       } else {
-        matrix[matrix_map[axis]] += transform_value;
+        components.translation.elements[map[axis]] += transform_value;
       }
     }
   }, this));
-  
-  return matrix;
+
+  return components;  
 }
 
 // rotation is a complex equation
