@@ -61,6 +61,8 @@ DDD.prototype.animate = function(/* args */) {
   // It works for now, but it's the section most in need of refactoring
   // into common functions, or a less confusing flow
 
+  // TODO: prevent multiple animations from interfering with each other
+
   var args = Array.prototype.slice.call(arguments);
   if (!args || !args.length) { return this; }
   if (!$.isPlainObject(args[0])) { return this; }
