@@ -1,4 +1,5 @@
 (function($) {
+
 // you can call ddd this way:
 //   $('#my_element').ddd();
 // or this way:
@@ -19,10 +20,13 @@ var DDD = function(selector) {
 
 // all transform methods get routed through this function
 // args can be array of [int/string, string] or [object]
+// or in the case of rotate functions, an array of objects
 DDD.prototype.transform = function(transform_func, args) {
   // check for bullshit, fail gracefully
   if (!arguments.length) { return this; }
   var transform = get_transform_object.apply(this, args);
+  console.log('transform', transform);
+
   if (!transform) { return this; }
 
   // use the identity matrix if one doesn't exist in css
@@ -53,6 +57,55 @@ DDD.prototype.transform = function(transform_func, args) {
   if (recomposed_matrix) {
     ddd.applyMatrix.call(this, recomposed_matrix);
   }
+
+  return this;
+}
+
+// $.ddd.animate({
+//    'scaleBy': [ 1.5, 'xy' ]
+//   ,'translateBy': [ 50, 'xyz' ]
+//   ,'rotateBy': [{ 'x': 50 }, { 'y': 25 }]
+// }, 2000, 'easeInCirc', function() {
+//   // complete callback
+// });
+DDD.prototype.animate = function(/* args */) {
+  var args = Array.prototype.slice.call(arguments);
+  if (!args || !args.length) { return this; }
+  if (!$.isPlainObject(args[0])) { return this; }
+  if (!args[1] || !$.isNumeric(args[1])) { return this; }
+
+  // convenience
+  var transforms = args[0];
+  var duration   = args[1];
+  var easing     = args[2] || 'linear';
+  var callback   = args[3] || $.noop;
+
+  var legit_functions = ['scaleBy', 'scaleTo'
+                        ,'translateBy', 'translateTo'
+                        ,'rotateBy', 'rotateTo'];
+  legit_functions.forEach($.proxy(function(fn, i) {
+    if (!transforms[fn]) { return; }
+
+    ($.proxy(function(transform, transform_fn) {
+      // this exploits a little-used CSS property
+      // called orphans to control the animation
+      this.$.css({ orphans: 0 });
+      this.$.animate({ orphans: 1 }, {
+         step: $.proxy(function(n, fx) {
+          if (n === 0) { return; }
+          var transform_object = get_transform_object.apply(this, transform);
+          $.each(transform_object, function(key, value) {
+            transform_object[key] = (n * ddd.parseValue(value)) + String(value).replace(/[0-9\.-]/g, '');
+          });
+
+          transform_fn.apply(this, [transform_object]);
+         }, this)
+        ,easing: easing
+        ,duration: duration
+        ,complete: callback
+      });
+    }, this))(transforms[fn], ddd[fn]);
+  }, this));
 
   return this;
 }
@@ -88,7 +141,7 @@ DDD.prototype.scale_func = function(components, transform) {
     if (transform[axis] === undefined) { return; }
 
     var transform_ratio = components.scale.elements[map[axis]];
-    var transform_value = +(String(transform[axis]).replace(/[^0-9\.-]/g, ''));
+    var transform_value = ddd.parseValue(transform[axis]);
     if (/%$/.test(String(transform[axis]))) { // scale by percent
       if (this.transform_type === 'to') {
         components.scale.elements[map[axis]] *= (transform_value * 0.01);
@@ -119,7 +172,7 @@ DDD.prototype.translate_func = function(components, transform) {
   ['x', 'y', 'z'].forEach($.proxy(function(axis, i, array) {
     if (transform[axis] === undefined) { return; }
 
-    var transform_value = +(String(transform[axis]).replace(/[^0-9\.-]/g, ''));
+    var transform_value = ddd.parseValue(transform[axis]);
     if (/%$/.test(String(transform[axis]))) { // scale by percent
       if (this.transform_type === 'to') {
         components.translation.elements[map[axis]] *= (transform_value * 0.01);
@@ -139,10 +192,10 @@ DDD.prototype.translate_func = function(components, transform) {
 }
 
 DDD.prototype.rotate_func = function(components, transforms) {
-  if (!$.isArray(transforms)) { transforms = [transforms] }
+  if (!$.isArray(transforms)) { transforms = [transforms]; }
 
   var map = { x: 0, y: 1, z: 2 };
-  transforms.forEach(function(transform, i) {
+  transforms.forEach($.proxy(function(transform, i) {
     var axis = transform.x ? 'x'
              : transform.y ? 'y'
              : transform.z ? 'z'
@@ -150,8 +203,8 @@ DDD.prototype.rotate_func = function(components, transforms) {
 
     if (axis === undefined) { return; }
 
-    var transform_value = +(String(transform[axis]).replace(/[^0-9\.-]/g, ''));
-    var rotation_angle = transform_value * (Math.PI / 180);
+    var transform_value = ddd.parseValue(transform[axis]);
+    var rotation_angle = (transform_value * (Math.PI / 180)) * -1;
     var rotation_axis = [0, 0, 0];
     rotation_axis[map[axis]] = 1;
 
@@ -162,6 +215,12 @@ DDD.prototype.rotate_func = function(components, transforms) {
       ,rotation_axis[2] * Math.sin(rotation_angle / 2)
       ,Math.cos(rotation_angle / 2)
     ]);
+
+    // if using rotateTo, the local_rotation is simply the new quat
+    if (this.transform_type === 'to') {
+      components.quaternion = local_rotation;
+      return components;
+    }
 
     // obtain the new quat by multiplying the old quat by the new rotation
     var quat_product = ddd.quaternionMultiply(components.quaternion, local_rotation);
@@ -182,7 +241,7 @@ DDD.prototype.rotate_func = function(components, transforms) {
         components.quaternion.elements[i] = components.quaternion.elements[i].toFixed(15);
       }
     }
-  });
+  }, this));
 
   return components;
 }
@@ -222,6 +281,11 @@ DDD.prototype.rotateBy = function(/* args */) {
 DDD.prototype.rotateTo = function(/* args */) {
   this.transform_type = 'to';
   return ddd.transform.call(this, ddd.rotate_func, arguments);
+}
+
+// parse a numeric value from a CSS string
+DDD.prototype.parseValue = function(value) {
+  return +(String(value).replace(/[^0-9\.-]/g, ''));
 }
 
 // parse a matrix3d() css string into a Sylvester Matrix
@@ -630,8 +694,8 @@ DDD.prototype.end = function() {
 }
 
 // convenient for using ddd functions within this library
-// instead of calling DDD.prototype.vectorLength()
-// with this I can just call ddd.vectorLength()
+// instead of calling DDD.prototype.someFunction()
+// with this I can just call ddd.someFunction()
 var ddd = $.ddd();
 
 // This is a minified copy of Sylvester 0.1.3 used for matrix/vector math.
