@@ -18,28 +18,17 @@ var DDD = function(selector) {
   return this;
 }
 
-// all transform methods get routed through this function
+// all normal transform methods get routed through this function
 // args can be array of [int/string, string] or [object]
 // or in the case of rotate functions, an array of objects
 DDD.prototype.transform = function(transform_func, args) {
   // check for bullshit, fail gracefully
   if (!arguments.length) { return this; }
   var transform = get_transform_object.apply(this, args);
-  console.log('transform', transform);
-
   if (!transform) { return this; }
 
-  // use the identity matrix if one doesn't exist in css
-  var matrix;
-  var css_matrix = this.$.css('transform');
-  if (!css_matrix || css_matrix === 'none') {
-    matrix = Matrix.I(4);
-  } else {
-    matrix = ddd.parseMatrix(css_matrix);
-    if (!matrix || !matrix.elements || isNaN(matrix.elements[0][0])) {
-      matrix = Matrix.I(4);
-    }
-  }
+  // get the current matrix
+  var matrix = ddd.getMatrix.call(this);
 
   // get the components of a matrix (scale, skew, transform, etc.)
   var components = ddd.decomposeMatrix(matrix);
@@ -54,9 +43,7 @@ DDD.prototype.transform = function(transform_func, args) {
   if (!recomposed_matrix) { return this; }
 
   // apply the new transform css
-  if (recomposed_matrix) {
-    ddd.applyMatrix.call(this, recomposed_matrix);
-  }
+  ddd.applyMatrix.call(this, recomposed_matrix);
 
   return this;
 }
@@ -69,6 +56,11 @@ DDD.prototype.transform = function(transform_func, args) {
 //   // complete callback
 // });
 DDD.prototype.animate = function(/* args */) {
+  // TODO: This duplicates some of the logic found in the transform_funcs
+  // and was the last part of the plugin added.
+  // It works for now, but it's the section most in need of refactoring
+  // into common functions, or a less confusing flow
+
   var args = Array.prototype.slice.call(arguments);
   if (!args || !args.length) { return this; }
   if (!$.isPlainObject(args[0])) { return this; }
@@ -80,31 +72,101 @@ DDD.prototype.animate = function(/* args */) {
   var easing     = args[2] || 'linear';
   var callback   = args[3] || $.noop;
 
-  var legit_functions = ['scaleBy', 'scaleTo'
+  var legit_functions = ['scaleBy'    , 'scaleTo'
                         ,'translateBy', 'translateTo'
-                        ,'rotateBy', 'rotateTo'];
-  legit_functions.forEach($.proxy(function(fn, i) {
-    if (!transforms[fn]) { return; }
+                        ,'rotateBy'   , 'rotateTo'];
 
-    ($.proxy(function(transform, transform_fn) {
-      // this exploits a little-used CSS property
-      // called orphans to control the animation
-      this.$.css({ orphans: 0 });
-      this.$.animate({ orphans: 1 }, {
-         step: $.proxy(function(n, fx) {
-          if (n === 0) { return; }
-          var transform_object = get_transform_object.apply(this, transform);
-          $.each(transform_object, function(key, value) {
-            transform_object[key] = (n * ddd.parseValue(value)) + String(value).replace(/[0-9\.-]/g, '');
-          });
+  // get the current matrix & components
+  var matrix = ddd.getMatrix.call(this);
+  var orig_components = ddd.decomposeMatrix.call(this, matrix);
+  if (!orig_components) { return this; }
+  var dest_quat = $.extend(true, {}, orig_components.quaternion); // only used when rotation is present
 
-          transform_fn.apply(this, [transform_object]);
-         }, this)
-        ,easing: easing
-        ,duration: duration
-        ,complete: callback
-      });
-    }, this))(transforms[fn], ddd[fn]);
+  $.each(transforms, $.proxy(function(fn_name, transform) {
+    if ($.inArray(fn_name, legit_functions) === -1) { return; }
+    var basic_type = fn_name.replace(/(To|By)$/, '');
+    var transform_type = /To$/.test(fn_name) ? 'to' : 'by';
+    var transform_object = get_transform_object.apply(this, transform);
+    var map = { x: 0, y: 1, z: 2 };
+
+    // rotations get Slerped inside the step function, but precalculated here
+    // TODO: currently slerp animation only works for one rotate transform at a time,
+    //       but it should work for a series as well
+    if (basic_type === 'rotate') {
+      $.each(transform_object, $.proxy(function(key, value) {
+        // var transform_value = ddd.parseValue(transform[axis]);
+        var rotation_angle = (value * (Math.PI / 180)) * -1;
+        var rotation_axis = [0, 0, 0];
+        rotation_axis[map[key]] = 1;
+
+        // make a quaternion representing the rotation
+        var local_rotation = Vector.create([
+           rotation_axis[0] * Math.sin(rotation_angle / 2)
+          ,rotation_axis[1] * Math.sin(rotation_angle / 2)
+          ,rotation_axis[2] * Math.sin(rotation_angle / 2)
+          ,Math.cos(rotation_angle / 2)
+        ]);
+
+        dest_quat = ddd.quaternionMultiply(dest_quat, local_rotation);
+      }));
+    }
+
+    this.$.css({ orphans: 0 });       // this exploits a little-used CSS property
+    this.$.animate({ orphans: 1 }, {  // called orphans to control the animation
+       step: $.proxy(function(n, fx) {
+        if (n === 0) { return; }
+        var new_transform = $.extend(true, {}, transform_object);
+        var cur_matrix = ddd.getMatrix.call(this); // this might be inefficient
+        var cur_components = ddd.decomposeMatrix.call(this, cur_matrix);
+
+        $.each(transform_object, $.proxy(function(key, value) {
+          if (!$.isNumeric(value)) { return; } // TODO: only allowing int values for now, should allow px/deg/% in future
+
+          switch (basic_type) {
+            case 'scale':
+              if (map[key] === undefined) { break; }
+
+              var size = (key === 'x') ? this.$.width() : this.$.height();
+              var scaled_size = orig_components.scale.elements[map[key]] * (size || 1);
+              if (transform_type === 'by') {
+                new_transform[key] = scaled_size + (new_transform[key] * n);
+              } else {
+                new_transform[key] = scaled_size + ((scaled_size - new_transform[key]) * n * -1);
+              }
+
+            break;
+            case 'translate':
+              if (map[key] === undefined) { break; }
+
+              if (transform_type === 'by') {
+                new_transform[key] = orig_components.translation.elements[map[key]] + (new_transform[key] * n);
+              } else {
+                new_transform[key] = orig_components.translation.elements[map[key]]
+                                   + ((orig_components.translation.elements[map[key]] - new_transform[key]) * n * -1);
+              }
+
+            break;
+          }
+        }, this));
+
+        var modified_components = $.extend(true, {}, orig_components);
+        if (dest_quat !== orig_components.quaternion) { // rotations are a special case - use slerp
+          modified_components.quaternion = ddd.quaternionSlerp(orig_components.quaternion, dest_quat, n)
+        } else { // apply the new transform step
+          this.transform_type = 'to'; // animations always get converted to absolute terms
+          modified_components = ddd[basic_type + '_func'].call(this, cur_components, new_transform);
+        }
+
+        if (!modified_components) { return; }
+        var recomposed_matrix = ddd.recomposeMatrix.call(this, modified_components);
+        if (!recomposed_matrix) { return; }
+        ddd.applyMatrix.call(this, recomposed_matrix);
+       }, this)
+      ,easing: easing
+      ,duration: duration
+      ,complete: callback
+    });
+
   }, this));
 
   return this;
@@ -286,6 +348,21 @@ DDD.prototype.rotateTo = function(/* args */) {
 // parse a numeric value from a CSS string
 DDD.prototype.parseValue = function(value) {
   return +(String(value).replace(/[^0-9\.-]/g, ''));
+}
+
+// gets the matrix from CSS, defaulting to the identity matrix
+DDD.prototype.getMatrix = function() {
+  var matrix;
+  var css_matrix = this.$.css('transform');
+  if (!css_matrix || css_matrix === 'none') {
+    matrix = Matrix.I(4); // use the identity matrix if one doesn't exist in css
+  } else {
+    matrix = ddd.parseMatrix(css_matrix);
+    if (!matrix || !matrix.elements || isNaN(matrix.elements[0][0])) {
+      matrix = Matrix.I(4);
+    }
+  }
+  return matrix;
 }
 
 // parse a matrix3d() css string into a Sylvester Matrix
@@ -684,6 +761,61 @@ DDD.prototype.quaternionMultiply = function(q1, q2) {
   ]);
 
   return vector;
+}
+
+// expects two quaternions as Sylvester vectors
+// and a theta value between -1 and 1
+// returns a quaternion as a Sylvester vector
+DDD.prototype.quaternionSlerp = function(q1, q2, t) {
+  var product = q1.dot(q2);
+
+  // clamp product between -1 and 1
+  // product = Math.max(product, 1);
+  // product = Math.min(product, -1);
+  product = Math.min(product,  1);
+  product = Math.max(product, -1);
+
+  if (product === 1) { return q1; }
+
+  var theta = Math.acos(product);
+  var w = Math.sin(t * theta) * (1 / Math.sqrt(1 - Math.pow(product, 2)));
+
+  var qA = $.extend(true, {}, q1);
+  var qB = $.extend(true, {}, q2);
+  var qQ = Vector.create([0,0,0,0]);
+  for (var i = 0; i < 4; i++) {
+    qA.elements[i] *= Math.cos(t * theta) - product * w;
+    qB.elements[i] *= w;
+    qQ.elements[i] = qA.elements[i] + qB.elements[i];
+  }
+
+  return qQ;
+
+  // double  dot(vector, vector)         returns the dot product of the passed vectors
+  // vector  multVector(vector, vector)  multiplies the passed vectors
+  // double  sqrt(double)                returns the root square of passed value
+  // double  max(double y, double x)     returns the bigger value of the two passed values
+  // double  min(double y, double x)     returns the smaller value of the two passed values
+  // double  cos(double)                 returns the cosines of passed value
+  // double  sin(double)                 returns the sine of passed value  
+  // double  acos(double)                returns the inverse cosine of passed value
+
+  // product = dot(quaternionA, quaternionB)
+
+
+  // if (product == 1.0)
+  //    quaternionDst = quaternionA
+  //    return
+
+  // theta = acos(dot)
+  // w = sin(t * theta) * 1 / sqrt(1 - product * product)
+
+  // for (i = 0; i < 4; i++)
+  //   quaternionA[i] *= cos(t * theta) - product * w
+  //   quaternionB[i] *= w
+  //   quaternionDst[i] = quaternionA[i] + quaternionB[i]
+
+  // return
 }
 
 // convenient for using DDD in a chained call
