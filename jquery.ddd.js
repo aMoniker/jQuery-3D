@@ -792,32 +792,6 @@ DDD.prototype.quaternionSlerp = function(q1, q2, t) {
   }
 
   return qQ;
-
-  // double  dot(vector, vector)         returns the dot product of the passed vectors
-  // vector  multVector(vector, vector)  multiplies the passed vectors
-  // double  sqrt(double)                returns the root square of passed value
-  // double  max(double y, double x)     returns the bigger value of the two passed values
-  // double  min(double y, double x)     returns the smaller value of the two passed values
-  // double  cos(double)                 returns the cosines of passed value
-  // double  sin(double)                 returns the sine of passed value  
-  // double  acos(double)                returns the inverse cosine of passed value
-
-  // product = dot(quaternionA, quaternionB)
-
-
-  // if (product == 1.0)
-  //    quaternionDst = quaternionA
-  //    return
-
-  // theta = acos(dot)
-  // w = sin(t * theta) * 1 / sqrt(1 - product * product)
-
-  // for (i = 0; i < 4; i++)
-  //   quaternionA[i] *= cos(t * theta) - product * w
-  //   quaternionB[i] *= w
-  //   quaternionDst[i] = quaternionA[i] + quaternionB[i]
-
-  // return
 }
 
 // convenient for using DDD in a chained call
