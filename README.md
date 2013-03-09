@@ -1,90 +1,77 @@
-The $.ddd library is a simple tool for manipulating 3d HTML objects.
+# $.ddd() - jQuery 3D
 
-First, to get a 3d object in ddd context:
+*version 0.2*
+
+The jQuery $.ddd plugin is a useful tool for manipulating 3D HTML5 elements.
+
+### Getting a $.ddd
+
+You can call `$.ddd()` functions in one of two ways.
+
+Get an HTML element in the `$.ddd()` context like this:
 
     var $cube = $.ddd('#my_cube');
 
-You can store this variable and call ddd functions on it,
+or like this:
+
+    var $cube = $('#my_cube').ddd();
+
+You can store this as a variable and call ddd functions on it,
 or you can chain the function call to the end of the $.ddd() selector.
 
-It exposes three useful functions, and their aptly-named counterparts:
+### Using $.ddd functions
 
-scaleBy(), rotateBy(), and translateBy()
+`$.ddd` currently exposes three main functions, and their aptly-named counterparts:
 
-or, if you prefer absolute frames of reference:
+ - `scaleBy()`
+ - `rotateBy()`
+ - `translateBy()`
 
-scaleTo(), rotateTo(), and translateTo()
+Or, if you prefer absolute frames of reference:
 
-They're called like this:
+ - `scaleTo()`
+ - `rotateTo()`
+ - `translateTo()`
 
-    $.ddd('#my_cube').scaleBy(50, 'x');
-    $.ddd('#my_cube').scaleBy(50, 'y');
-    $.ddd('#my_cube').scaleBy(50, 'xy');
-    $.ddd('#my_cube').scaleBy({
-       'x': 50, 'y': 100, 'z': 1337
-    });
+They can be called like this:
 
-scaleTo() takes the same varieties of arguments, but instead of scaling *by* a certain number of pixels, it scales *to* that number.
+    $.ddd('#my_cube').translateTo(-100, 'y');
 
-Likewise, translateBy() & translateTo() as well as rotateBy() and rotateTo() take arguments in the same format.
+    $('#my_cube').ddd().rotateBy(45, 'z');
 
-The four translate & scale functions each take a number of pixels (e.g. 125 or '125px') or a percent ('15%').
-The two rotate functions instead take a number of degrees (-45 or '-45deg').
+    $.ddd('#my_cube').scaleBy('100%', 'xy');
+
+    $('#my_cube').ddd().translateTo({ y: 0, x: 150 });
+
+The `To` functions take the same varieties of arguments as the `By` functions, but instead of scaling *by* a certain number of pixels, it scales *to* that number, as you might expect.
+
+The four `translate` & `scale` functions each take a number of pixels (e.g. `125` or `'125px'`) or a percent (`'15%'`).
+The two `rotate` functions instead take a number of degrees (`-45` or `'-45deg'`).
 
 These functions provide instantaneous 3d transformations, which can be useful on their own or in the step() function of animations.
 
-$.ddd also includes an animation implementation called like this:
+### Animations
 
-$.ddd('#my_cube').animate({
-   'scaleBy':     [ 1.5, 'xy' ]
-  ,'translateBy': [ 50, 'x' ]
-  ,'rotateBy':    { 'x': 45 ,'y', 90, 'z': 180 }
-}, 2000, 'easeInCirc', function() {
-  // this callback fires on
-  // animation completion
-});
+For this reason, `$.ddd` also includes an animation implementation called like this:
 
-As you can see, the arrays/object of arguments in this .animate() call are the same as defined above, and correspond to their functions.
+    $.ddd('#my_cube').animate({
+       'scaleBy':     [ 100, 'xy' ]
+      ,'translateBy': [ 50, 'x' ]
+      ,'rotateBy':    [ 45, 'z' ]
+    }, 2000, 'easeInCirc', function() {
+      // this callback fires on
+      // animation completion
+    });
 
-I hope you find this library useful!
+As you can see, the first argument object corresponds to the functions described above. Similar to jQuery's own `.animate()`, this version takes a duration in the form of milliseconds, any of the jQuery easing functions, and an optional callback. Only the first two parameters are required.
 
+### Hackers
 
-scaleBy(1.5, 'xyz')
-scaleBy({})
-scaleTo(10, 'xy')
-scaleTo({})
+Additionally, there are a number of helper functions exposed (but not documented yet) that you may find useful for parsing CSS matrices, manipulating quaternions, or doing basic vector math.
 
-translateBy(40, 'x')
-translateBy({})
-translateTo(50, 'xy')
-translateTo({})
+If you'd like access to these functions, but don't want the context of a particular DOM node, use:
 
-$.ddd('#screenshot').rotateBy(45, 'x')
-rotateBy(90, 'xy')
-rotateBy({ 'x': 45, 'y': -28, 'z': 150 })
-rotateBy({ 'x': 45, 'y': -28, 'z': 150 }, 2000, 'easeOutQuad')
-
-$my_3d_object = $.ddd('#screenshot');
-$my_3d_object.rotateBy(45, 'x');
-$my_3d_object.translateBy(50, 'xy');
-
-$.ddd.animate({
-   'scaleBy': [ 1.5, 'xy' ]
-  ,'translateBy': [ 50, 'xyz' ]
-  ,'rotateBy': [{ 'x': 50, 'y', 25 }]
-}, 2000, 'easeInCirc', function() {
-  // complete callback
-});
+    var ddd = $.ddd();
 
 
-You can call ddd one of two main ways:
-  `var ddd = $.ddd('#my-element');`
-or
-  `var ddd = $('#my-element').ddd();`
-
-If you'd just like access to some of ddd's useful functions,
-but don't want it in the context of a particular DOM node:
-  var ddd = $.ddd();
-Note that transformation calls won't work without a proper DOM context,
-which can be set manually by `ddd.$ = $('#my-dom-node');`
-If you use ddd this way, you are a hacker, and are own your own.
+Note that transformation calls won't work without a proper DOM context (which can be set manually by `ddd.$ = $('#my-dom-node');`)
