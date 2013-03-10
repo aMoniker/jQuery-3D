@@ -4,7 +4,7 @@
 
 The jQuery $.ddd plugin is a useful tool for manipulating 3D HTML5 elements.
 
-### Getting a $.ddd
+### Let's get $.ddd
 
 You can call `$.ddd()` functions in one of two ways.
 
